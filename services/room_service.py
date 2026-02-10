@@ -3,9 +3,12 @@ import os
 import uuid
 import asyncio
 import warnings
+import logging
 from typing import Optional, Dict
 from datetime import datetime, timedelta
 from livekit import api
+
+logger = logging.getLogger(__name__)
 
 
 class RoomService:
@@ -103,9 +106,10 @@ class RoomService:
                     metadata=f"agent:{agent_name}",  # 关键：通过元数据传递Agent信息
                 )
             )
-            
-            # 记录房间信息
+            # 记录房间信息（使用 room_name 作为 key）
             self.active_rooms[room_name] = {
+                "room_name": room_name,
+                "room_id": room.sid,  # 保存 room_id 仅用于响应，不用于操作
                 "agent_name": agent_name,
                 "created_at": datetime.now(),
                 "timeout_minutes": timeout_minutes,
@@ -117,6 +121,7 @@ class RoomService:
             )
             
             return {
+                "room_id": room.sid,  # 返回 room_id 供客户端使用（如果需要）
                 "room_name": room_name,
                 "agent_name": agent_name,
                 "metadata": room.metadata,
@@ -146,15 +151,20 @@ class RoomService:
         """
         await asyncio.sleep(timeout_minutes * 60)
         try:
-            # 使用 DeleteRoomRequest 作为参数
+            # 检查房间是否还存在
+            if room_name not in self.active_rooms:
+                logger.warning(f"房间 {room_name} 不存在于 active_rooms 中，跳过关闭")
+                return
+            
+            # 使用 room_name 删除房间
             await self.lkapi.room.delete_room(
                 api.DeleteRoomRequest(room=room_name)
             )
             if room_name in self.active_rooms:
                 del self.active_rooms[room_name]
-            print(f"✓ 房间 {room_name} 已定时关闭")
+            logger.info(f"房间 {room_name} 已定时关闭")
         except Exception as e:
-            print(f"✗ 关闭房间失败: {e}")
+            logger.error(f"关闭房间失败: {room_name}, 错误: {e}", exc_info=True)
     
     def generate_token(
         self, 
@@ -209,15 +219,23 @@ class RoomService:
             是否删除成功
         """
         try:
-            # 使用 DeleteRoomRequest 作为参数
+            # 检查房间是否存在
+            if room_name not in self.active_rooms:
+                logger.warning(f"房间 {room_name} 不存在于 active_rooms 中")
+                return False
+            
+            # 使用 room_name 删除房间
             await self.lkapi.room.delete_room(
                 api.DeleteRoomRequest(room=room_name)
             )
+            
+            # 从 active_rooms 中删除
             if room_name in self.active_rooms:
                 del self.active_rooms[room_name]
+            logger.info(f"房间 {room_name} 已删除")
             return True
         except Exception as e:
-            print(f"删除房间失败: {e}")
+            logger.error(f"删除房间失败: {room_name}, 错误: {e}", exc_info=True)
             return False
     
     def get_room_info(self, room_name: str) -> Optional[dict]:
@@ -230,6 +248,7 @@ class RoomService:
         Returns:
             房间信息字典，如果房间不存在则返回None
         """
+        # 直接使用 room_name 作为 key 查找
         return self.active_rooms.get(room_name)
     
     async def close(self):

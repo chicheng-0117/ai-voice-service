@@ -1,6 +1,6 @@
 """API 依赖项"""
 from typing import Optional
-from fastapi import HTTPException, Depends, Header
+from fastapi import HTTPException, Depends, Header, Query
 from services.room_service import RoomService
 from services.auth_service import AuthService
 
@@ -23,15 +23,15 @@ def get_room_service() -> RoomService:
 
 
 async def verify_api_token(
-    authorization: str = Header(..., description="Bearer token")
+    token: str = Query(..., description="API访问Token")
 ) -> dict:
     """
     验证API Token依赖项
     
-    从请求头中提取并验证token
+    从查询参数中获取并验证token
     
     Args:
-        authorization: Authorization请求头，格式: "Bearer <token>"
+        token: API访问Token（查询参数）
         
     Returns:
         Token payload（包含user_id等信息）
@@ -39,15 +39,6 @@ async def verify_api_token(
     Raises:
         HTTPException: Token无效或过期
     """
-    # 检查 Authorization 头格式
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="无效的认证格式，请使用: Bearer <token>"
-        )
-    
-    # 提取 token
-    token = authorization.replace("Bearer ", "").strip()
     if not token:
         raise HTTPException(
             status_code=401,
@@ -63,3 +54,26 @@ async def verify_api_token(
         )
     
     return payload
+
+
+def get_user_id_from_header(
+    user_id: str = Header(..., description="用户ID", alias="userId")
+) -> str:
+    """
+    从请求头获取用户ID
+    
+    Args:
+        user_id: 用户ID（请求头 userId）
+        
+    Returns:
+        用户ID字符串
+        
+    Raises:
+        HTTPException: 如果用户ID为空
+    """
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="用户ID不能为空"
+        )
+    return user_id

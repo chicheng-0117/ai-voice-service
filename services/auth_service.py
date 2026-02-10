@@ -20,13 +20,12 @@ class AuthService:
     """API认证服务类"""
     
     @staticmethod
-    def generate_token(user_id: str, username: Optional[str] = None) -> tuple[str, datetime]:
+    def generate_token(user_id: str) -> tuple[str, datetime]:
         """
         生成API访问Token
         
         Args:
             user_id: 用户ID
-            username: 用户名（可选）
             
         Returns:
             (token, expires_at) 元组
@@ -38,7 +37,6 @@ class AuthService:
         # 创建 JWT payload（exp 和 iat 需要是时间戳）
         payload = {
             "user_id": user_id,
-            "username": username,
             "exp": int(expires_at.timestamp()),
             "iat": int(now.timestamp()),
             "type": "api_access"
@@ -51,7 +49,6 @@ class AuthService:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         token_store[token_hash] = {
             "user_id": user_id,
-            "username": username,
             "expires_at": expires_at,
             "created_at": now,
         }

@@ -1,21 +1,22 @@
 """认证相关路由"""
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Query, Depends
+from api.dependencies import get_user_id_from_header
 from models import success_response, error_response
-from models.auth_models import LoginRequest, LoginResponse
+from models.auth_models import LoginResponse
 from services.auth_service import AuthService
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.post("/login")
-async def login(request: LoginRequest):
+async def login(user_id: str = Depends(get_user_id_from_header)):
     """
     登录并获取API访问Token
     
     Token有效期为1小时
     
     Args:
-        request: 登录请求
+        user_id: 用户ID（从请求头 userId 获取）
         
     Returns:
         Token信息
@@ -23,15 +24,13 @@ async def login(request: LoginRequest):
     try:
         # 生成token
         token, expires_at = AuthService.generate_token(
-            user_id=request.user_id,
-            username=request.username
+            user_id=user_id
         )
         
         login_data = LoginResponse(
             token=token,
             expires_at=expires_at.isoformat(),
-            user_id=request.user_id,
-            username=request.username,
+            user_id=user_id,
         )
         
         return success_response(
@@ -46,24 +45,21 @@ async def login(request: LoginRequest):
 
 
 @router.post("/logout")
-async def logout(authorization: str = Header(..., description="Bearer token")):
+async def logout(token: str = Query(..., description="API访问Token")):
     """
     登出并撤销Token
     
     Args:
-        authorization: Authorization请求头
+        token: API访问Token（查询参数）
         
     Returns:
         登出结果
     """
-    # 提取token
-    if not authorization.startswith("Bearer "):
+    if not token:
         return error_response(
             code=401,
-            msg="无效的认证格式"
+            msg="Token不能为空"
         )
-    
-    token = authorization.replace("Bearer ", "").strip()
     
     # 撤销token
     success = AuthService.revoke_token(token)

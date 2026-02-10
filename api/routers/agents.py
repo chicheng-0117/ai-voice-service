@@ -11,7 +11,7 @@ VALID_AGENTS = {
 }
 
 
-@router.get("", dependencies=[Depends(verify_api_token)])
+@router.post("/list", dependencies=[Depends(verify_api_token)])
 async def list_agents():
     """
     列出可用的Agent

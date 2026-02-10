@@ -6,7 +6,6 @@ from pydantic import BaseModel
 class GenerateTokenRequest(BaseModel):
     """生成Token请求模型"""
     room_name: str
-    user_id: Optional[str] = None
     can_publish: bool = True
     can_subscribe: bool = True
 

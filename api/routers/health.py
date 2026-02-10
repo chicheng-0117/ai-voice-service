@@ -7,7 +7,7 @@ from models import success_response
 router = APIRouter(tags=["health"])
 
 
-@router.get("/health")
+@router.post("/health")
 async def health_check(service: RoomService = Depends(get_room_service)):
     """
     健康检查端点
