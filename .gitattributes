@@ -1,0 +1,18 @@
+# 确保文本文件使用 LF 换行符
+* text=auto eol=lf
+
+# Python 文件
+*.py text eol=lf
+
+# 配置文件
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+
+# 文档
+*.md text eol=lf
+
+# 锁定文件
+*.lock text eol=lf
+
