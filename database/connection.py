@@ -66,7 +66,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db():
     """初始化数据库（创建表）"""
-    from database.models import Agent, Room
+    from database.models import Agent, Room, Conversation
     
     async with engine.begin() as conn:
         # 创建所有表
