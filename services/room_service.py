@@ -6,7 +6,10 @@ import warnings
 import logging
 from typing import Optional, Dict
 from datetime import datetime, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
 from livekit import api
+from database.repositories import RoomRepository, AgentRepository
+from database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +37,6 @@ class RoomService:
             self.lkapi = api.LiveKitAPI(url=api_url)
         else:
             self.lkapi = api.LiveKitAPI()
-        
-        self.active_rooms: Dict[str, dict] = {}
         
         # 房间超时时间配置（分钟），可以从环境变量读取，默认3分钟
         self.room_timeout_minutes = int(os.getenv("ROOM_TIMEOUT_MINUTES", "3"))
@@ -81,13 +82,19 @@ class RoomService:
     
     async def create_room(
         self, 
-        agent_name: str
+        agent_name: str,
+        user_id: str,
+        room_token: str,
+        db: AsyncSession
     ) -> dict:
         """
         创建房间，在元数据中指定Agent
         
         Args:
             agent_name: Agent名称（如 peppa, george）
+            user_id: 用户ID
+            room_token: LiveKit访问Token
+            db: 数据库会话
             
         Returns:
             包含房间信息的字典
@@ -107,14 +114,20 @@ class RoomService:
                     metadata=f"agent:{agent_name}",  # 关键：通过元数据传递Agent信息
                 )
             )
-            # 记录房间信息（使用 room_name 作为 key）
-            self.active_rooms[room_name] = {
-                "room_name": room_name,
-                "room_id": room.sid,  # 保存 room_id 仅用于响应，不用于操作
-                "agent_name": agent_name,
-                "created_at": datetime.now(),
-                "timeout_minutes": self.room_timeout_minutes,
-            }
+            
+            # 保存到数据库（room_token 先为空，后面会更新）
+            db_room = await RoomRepository.create(
+                session=db,
+                room_name=room_name,
+                room_sid=room.sid,
+                agent_name=agent_name,
+                user_id=user_id,
+                room_token=room_token or "",  # 如果为空则传空字符串
+                timeout_minutes=self.room_timeout_minutes,
+            )
+            await db.commit()
+            
+            logger.info(f"房间记录已保存到数据库: {room_name}, ID: {db_room.id}")
             
             # 启动定时关闭任务
             asyncio.create_task(
@@ -128,6 +141,7 @@ class RoomService:
                 "metadata": room.metadata,
             }
         except Exception as e:
+            await db.rollback()
             error_msg = str(e)
             # 提供更友好的错误信息
             if "getaddrinfo failed" in error_msg or "Cannot connect" in error_msg:
@@ -152,18 +166,47 @@ class RoomService:
         """
         await asyncio.sleep(timeout_minutes * 60)
         try:
-            # 检查房间是否还存在
-            if room_name not in self.active_rooms:
-                logger.warning(f"房间 {room_name} 不存在于 active_rooms 中，跳过关闭")
-                return
-            
-            # 使用 room_name 删除房间
-            await self.lkapi.room.delete_room(
-                api.DeleteRoomRequest(room=room_name)
-            )
-            if room_name in self.active_rooms:
-                del self.active_rooms[room_name]
-            logger.info(f"房间 {room_name} 已定时关闭")
+            # 从数据库获取会话
+            async for db in get_db():
+                # 检查房间是否存在
+                room = await RoomRepository.get_by_name(db, room_name)
+                if not room:
+                    logger.warning(f"房间 {room_name} 不存在于数据库中，跳过关闭")
+                    return
+                
+                # 检查房间是否已经关闭
+                if room.status == "closed":
+                    logger.info(f"房间 {room_name} 已经关闭，跳过定时关闭")
+                    return
+                
+                # 超时关闭时，离开时间就是关闭时间
+                close_time = datetime.now()
+                
+                # 计算聊天时长（如果用户已加入）
+                chat_duration = 0
+                if room.user_joined_at:
+                    # 如果已有离开时间，使用离开时间计算；否则使用当前时间
+                    left_time = room.user_left_at if room.user_left_at else close_time
+                    duration = (left_time - room.user_joined_at).total_seconds()
+                    chat_duration = max(0, int(duration))
+                
+                # 使用 room_name 删除房间
+                await self.lkapi.room.delete_room(
+                    api.DeleteRoomRequest(room=room_name)
+                )
+                
+                # 更新用户离开时间和聊天时长（超时关闭时，如果 user_left_at 没有值才更新）
+                if room.user_joined_at and not room.user_left_at:  # 只有用户已加入且离开时间未记录才更新
+                    await RoomRepository.update_user_left(db, room_name, chat_duration, left_at=close_time)
+                elif room.user_left_at:
+                    logger.info(f"房间 {room_name} 用户离开时间已存在，跳过更新")
+                
+                # 更新数据库状态为 closed
+                await RoomRepository.close_room(db, room_name, chat_duration=chat_duration)
+                await db.commit()
+                
+                logger.info(f"房间 {room_name} 已定时关闭（超时关闭，离开时间已记录）")
+                break  # 只处理一次
         except Exception as e:
             logger.error(f"关闭房间失败: {room_name}, 错误: {e}", exc_info=True)
     
@@ -209,48 +252,85 @@ class RoomService:
         
         return token.to_jwt(), user_id
     
-    async def delete_room(self, room_name: str) -> bool:
+    async def delete_room(self, room_name: str, db: AsyncSession) -> bool:
         """
-        删除房间
+        删除房间（只删除 LiveKit 房间，不删除数据库记录，只更新状态）
         
         Args:
             room_name: 房间名称
+            db: 数据库会话
             
         Returns:
             是否删除成功
         """
         try:
             # 检查房间是否存在
-            if room_name not in self.active_rooms:
-                logger.warning(f"房间 {room_name} 不存在于 active_rooms 中")
+            room = await RoomRepository.get_by_name(db, room_name)
+            if not room:
+                logger.warning(f"房间 {room_name} 不存在于数据库中")
                 return False
             
-            # 使用 room_name 删除房间
+            # 如果房间已经是关闭状态，直接返回成功
+            if room.status == "closed":
+                logger.info(f"房间 {room_name} 已经是关闭状态")
+                return True
+            
+            # 使用 room_name 删除 LiveKit 房间
             await self.lkapi.room.delete_room(
                 api.DeleteRoomRequest(room=room_name)
             )
             
-            # 从 active_rooms 中删除
-            if room_name in self.active_rooms:
-                del self.active_rooms[room_name]
-            logger.info(f"房间 {room_name} 已删除")
+            # 主动删除时，离开时间就是房间关闭的时间
+            close_time = datetime.now()
+            
+            # 计算聊天时长（如果用户已加入）
+            chat_duration = 0
+            if room.user_joined_at:
+                duration = (close_time - room.user_joined_at).total_seconds()
+                chat_duration = max(0, int(duration))
+            
+            # 更新用户离开时间和聊天时长（主动删除时记录离开时间，使用关闭时间）
+            await RoomRepository.update_user_left(db, room_name, chat_duration, left_at=close_time)
+            
+            # 更新数据库状态为 closed（不删除记录）
+            await RoomRepository.close_room(db, room_name)
+            await db.commit()
+            
+            logger.info(f"房间 {room_name} 已关闭（LiveKit 房间已删除，数据库记录已更新，离开时间已记录）")
             return True
         except Exception as e:
+            await db.rollback()
             logger.error(f"删除房间失败: {room_name}, 错误: {e}", exc_info=True)
             return False
     
-    def get_room_info(self, room_name: str) -> Optional[dict]:
+    async def get_room_info(self, room_name: str, db: AsyncSession) -> Optional[dict]:
         """
         获取房间信息
         
         Args:
             room_name: 房间名称
+            db: 数据库会话
             
         Returns:
             房间信息字典，如果房间不存在则返回None
         """
-        # 直接使用 room_name 作为 key 查找
-        return self.active_rooms.get(room_name)
+        room = await RoomRepository.get_by_name(db, room_name)
+        if not room:
+            return None
+        
+        return {
+            "room_name": room.room_name,
+            "room_sid": room.room_sid,
+            "agent_name": room.agent_name,
+            "user_id": room.user_id,
+            "timeout_minutes": room.timeout_minutes,
+            "status": room.status,
+            "created_at": room.created_at,
+            "user_joined_at": room.user_joined_at,
+            "user_left_at": room.user_left_at,
+            "chat_duration": room.chat_duration,
+            "closed_at": room.closed_at,
+        }
     
     async def close(self):
         """

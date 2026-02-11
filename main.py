@@ -2,17 +2,23 @@
 import logging
 import traceback
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+# ⚠️ 必须在所有其他导入之前加载环境变量
+# 因为 database.connection 在模块导入时就会读取环境变量
+load_dotenv(".env.local")
+
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
-from dotenv import load_dotenv
 
 from services.room_service import RoomService
 from api import dependencies
 from api.routers import agents, rooms, health, auth
 from models import success_response, error_response, ApiResponse
+from database import init_db
 
 # 配置日志
 import sys
@@ -79,15 +85,18 @@ root_logger.addHandler(console_handler)
 
 logger = logging.getLogger(__name__)
 
-# 加载环境变量
-load_dotenv(".env.local")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时初始化
     try:
+        # 初始化数据库
+        logger.info("正在初始化数据库...")
+        await init_db()
+        logger.info("✓ 数据库初始化成功")
+        
+        # 初始化 RoomService
         logger.info("正在初始化 RoomService...")
         room_service_instance = RoomService()
         # 设置到 dependencies 模块中，供依赖注入使用
@@ -98,7 +107,7 @@ async def lifespan(app: FastAPI):
         logger.error("请检查 .env.local 文件是否已正确配置。")
         raise
     except Exception as e:
-        logger.error(f"✗ RoomService 初始化失败: {e}")
+        logger.error(f"✗ 初始化失败: {e}")
         logger.error(traceback.format_exc())
         raise
     
