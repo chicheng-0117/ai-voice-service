@@ -4,8 +4,8 @@ from pydantic import BaseModel
 
 class CreateRoomRequest(BaseModel):
     """创建房间请求模型"""
+    token: str  # API访问Token
     role_name: str  # peppa, george 等
-    timeout_minutes: int = 60  # 房间超时时间（分钟）
 
 
 class CreateRoomResponse(BaseModel):
@@ -17,10 +17,12 @@ class CreateRoomResponse(BaseModel):
 
 class GetRoomInfoRequest(BaseModel):
     """获取房间信息请求模型"""
+    token: str  # API访问Token
     room_name: str
 
 
 class DeleteRoomRequest(BaseModel):
     """删除房间请求模型"""
+    token: str  # API访问Token
     room_name: str
 

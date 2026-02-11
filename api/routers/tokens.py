@@ -13,11 +13,12 @@ from models import (
 router = APIRouter(prefix="/api/tokens", tags=["tokens"])
 
 
-@router.post("", dependencies=[Depends(verify_api_token)])
+@router.post("")
 async def generate_token(
     request: GenerateTokenRequest,
     user_id: str = Depends(get_user_id_from_header),
-    service: RoomService = Depends(get_room_service)
+    service: RoomService = Depends(get_room_service),
+    _: dict = Depends(verify_api_token)  # 验证 token，但不使用返回值
 ):
     """
     生成访问Token

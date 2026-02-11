@@ -1,6 +1,7 @@
 """Agent 相关路由"""
 from fastapi import APIRouter, Depends
 from models import success_response
+from models.agent_models import ListAgentsRequest
 from api.dependencies import verify_api_token
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -11,11 +12,17 @@ VALID_AGENTS = {
 }
 
 
-@router.post("/list", dependencies=[Depends(verify_api_token)])
-async def list_agents():
+@router.post("/list")
+async def list_agents(
+    request: ListAgentsRequest,
+    _: dict = Depends(verify_api_token)  # 验证 token，但不使用返回值
+):
     """
     列出可用的Agent
     
+    Args:
+        request: 包含 token 的请求
+        
     Returns:
         包含所有可用Agent的列表
     """

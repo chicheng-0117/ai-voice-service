@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class GenerateTokenRequest(BaseModel):
     """生成Token请求模型"""
+    token: str  # API访问Token
     room_name: str
     can_publish: bool = True
     can_subscribe: bool = True

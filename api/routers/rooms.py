@@ -21,11 +21,12 @@ router = APIRouter(prefix="/api/rooms", tags=["rooms"])
 from api.routers.agents import VALID_AGENTS
 
 
-@router.post("/create", dependencies=[Depends(verify_api_token)])
+@router.post("/create")
 async def create_room(
     request: CreateRoomRequest,
     user_id: str = Depends(get_user_id_from_header),
-    service: RoomService = Depends(get_room_service)
+    service: RoomService = Depends(get_room_service),
+    _: dict = Depends(verify_api_token)  # 验证 token，但不使用返回值
 ):
     """
     创建房间并生成Token
@@ -51,7 +52,6 @@ async def create_room(
         logger.info(f"用户 {user_id} 正在创建房间，角色: {request.role_name}")
         room_info = await service.create_room(
             agent_name=request.role_name,
-            timeout_minutes=request.timeout_minutes,
         )
         logger.info(f"房间创建成功: {room_info['room_name']}")
     except Exception as e:
@@ -90,10 +90,11 @@ async def create_room(
     )
 
 
-@router.post("/info", dependencies=[Depends(verify_api_token)])
+@router.post("/info")
 async def get_room_info(
     request: GetRoomInfoRequest,
-    service: RoomService = Depends(get_room_service)
+    service: RoomService = Depends(get_room_service),
+    _: dict = Depends(verify_api_token)  # 验证 token，但不使用返回值
 ):
     """
     获取房间信息
@@ -125,10 +126,11 @@ async def get_room_info(
     )
 
 
-@router.post("/delete", dependencies=[Depends(verify_api_token)])
+@router.post("/delete")
 async def delete_room(
     request: DeleteRoomRequest,
-    service: RoomService = Depends(get_room_service)
+    service: RoomService = Depends(get_room_service),
+    _: dict = Depends(verify_api_token)  # 验证 token，但不使用返回值
 ):
     """
     删除房间

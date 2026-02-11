@@ -1,6 +1,7 @@
 """API 依赖项"""
+import json
 from typing import Optional
-from fastapi import HTTPException, Depends, Header, Query
+from fastapi import HTTPException, Depends, Header, Request
 from services.room_service import RoomService
 from services.auth_service import AuthService
 
@@ -22,16 +23,14 @@ def get_room_service() -> RoomService:
     return room_service
 
 
-async def verify_api_token(
-    token: str = Query(..., description="API访问Token")
-) -> dict:
+async def verify_api_token(request: Request) -> dict:
     """
     验证API Token依赖项
     
-    从查询参数中获取并验证token
+    从请求体中获取并验证token
     
     Args:
-        token: API访问Token（查询参数）
+        request: FastAPI Request 对象
         
     Returns:
         Token payload（包含user_id等信息）
@@ -39,21 +38,54 @@ async def verify_api_token(
     Raises:
         HTTPException: Token无效或过期
     """
-    if not token:
+    try:
+        # 读取请求体
+        body_bytes = await request.body()
+        if not body_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail="请求体不能为空，请在请求体中提供 token 字段"
+            )
+        
+        # 解析 JSON
+        body = json.loads(body_bytes.decode())
+        token = body.get("token")
+        
+        if not token:
+            raise HTTPException(
+                status_code=401,
+                detail="Token不能为空，请在请求体中提供 token 字段"
+            )
+        
+        # 验证 token
+        payload = AuthService.verify_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=401,
+                detail="Token无效或已过期"
+            )
+        
+        # 将请求体缓存到 request.state，以便后续的请求模型可以正常解析
+        # 注意：FastAPI 的请求体只能读取一次，所以需要重新设置
+        async def receive():
+            return {"type": "http.request", "body": body_bytes}
+        
+        # 重新设置 _receive 方法，使请求体可以再次读取
+        request._receive = receive
+        
+        return payload
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="请求体必须是有效的 JSON 格式，且包含 token 字段"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
             status_code=401,
-            detail="Token不能为空"
+            detail=f"Token验证失败: {str(e)}"
         )
-    
-    # 验证 token
-    payload = AuthService.verify_token(token)
-    if not payload:
-        raise HTTPException(
-            status_code=401,
-            detail="Token无效或已过期"
-        )
-    
-    return payload
 
 
 def get_user_id_from_header(

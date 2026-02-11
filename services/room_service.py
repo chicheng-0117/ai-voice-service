@@ -36,6 +36,9 @@ class RoomService:
             self.lkapi = api.LiveKitAPI()
         
         self.active_rooms: Dict[str, dict] = {}
+        
+        # 房间超时时间配置（分钟），可以从环境变量读取，默认3分钟
+        self.room_timeout_minutes = int(os.getenv("ROOM_TIMEOUT_MINUTES", "3"))
     
     def _validate_env_vars(self):
         """验证必需的环境变量"""
@@ -78,15 +81,13 @@ class RoomService:
     
     async def create_room(
         self, 
-        agent_name: str, 
-        timeout_minutes: int = 60
+        agent_name: str
     ) -> dict:
         """
         创建房间，在元数据中指定Agent
         
         Args:
             agent_name: Agent名称（如 peppa, george）
-            timeout_minutes: 房间超时时间（分钟），默认60分钟
             
         Returns:
             包含房间信息的字典
@@ -112,12 +113,12 @@ class RoomService:
                 "room_id": room.sid,  # 保存 room_id 仅用于响应，不用于操作
                 "agent_name": agent_name,
                 "created_at": datetime.now(),
-                "timeout_minutes": timeout_minutes,
+                "timeout_minutes": self.room_timeout_minutes,
             }
             
             # 启动定时关闭任务
             asyncio.create_task(
-                self._schedule_room_close(room_name, timeout_minutes)
+                self._schedule_room_close(room_name, self.room_timeout_minutes)
             )
             
             return {

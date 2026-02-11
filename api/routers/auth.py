@@ -1,8 +1,8 @@
 """认证相关路由"""
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Depends
 from api.dependencies import get_user_id_from_header
 from models import success_response, error_response
-from models.auth_models import LoginResponse
+from models.auth_models import LoginResponse, LogoutRequest
 from services.auth_service import AuthService
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -45,24 +45,24 @@ async def login(user_id: str = Depends(get_user_id_from_header)):
 
 
 @router.post("/logout")
-async def logout(token: str = Query(..., description="API访问Token")):
+async def logout(request: LogoutRequest):
     """
     登出并撤销Token
     
     Args:
-        token: API访问Token（查询参数）
+        request: 登出请求（包含 token）
         
     Returns:
         登出结果
     """
-    if not token:
+    if not request.token:
         return error_response(
             code=401,
             msg="Token不能为空"
         )
     
     # 撤销token
-    success = AuthService.revoke_token(token)
+    success = AuthService.revoke_token(request.token)
     if success:
         return success_response(
             data=None,
